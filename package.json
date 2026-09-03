@@ -1,15 +1,14 @@
-app.get('/check', async (req, res) => {
-    let { sender, target } = req.query; // sender: যে নম্বরে সেশন চালু আছে, target: যে নম্বর চেক করতে চান
-    
-    try {
-        // বিদ্যমান সেশন থেকে sock অবজেক্ট দিয়ে চেক করা
-        const [result] = await sock.onWhatsApp(target);
-        if (result && result.exists) {
-            return res.json({ status: true, exists: true, jid: result.jid });
-        } else {
-            return res.json({ status: true, exists: false });
-        }
-    } catch (err) {
-        return res.status(500).json({ status: false, error: err.message });
-    }
-});
+{
+  "name": "wa-pair-api",
+  "version": "1.0.0",
+  "description": "WhatsApp pairing API",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "^6.6.0",
+    "express": "^4.18.2",
+    "pino": "^8.14.0"
+  }
+}
