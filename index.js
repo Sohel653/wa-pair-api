@@ -1,24 +1,39 @@
 const express = require('express');
-const { default: makeWASocket, useMultiFileAuthState, delay, DisconnectReason } = require('@whiskeysockets/baileys');
+const { default: makeWASocket, useMultiFileAuthState, delay, DisconnectReason, Browsers } = require('@whiskeysockets/baileys');
 const pino = require('pino');
 const fs = require('fs');
+const path = require('path');
 
 const app = express();
 app.use(express.json());
 
 const activeSockets = {};
+const PORT = process.env.PORT || 3000;
 
-// সকেট তৈরি ও হ্যান্ডলিংয়ের জন্য আলাদা ফাংশন
+// সেশন ডিরেক্টরি নিশ্চিত করা
+const sessionsDir = path.join(__dirname, 'sessions');
+if (!fs.existsSync(sessionsDir)) {
+    fs.mkdirSync(sessionsDir, { recursive: true });
+}
+
+// সকেট তৈরি ও হ্যান্ডলিংয়ের জন্য ফাংশন
 async function startWASocket(phone) {
     if (activeSockets[phone]) return activeSockets[phone];
 
-    const { state, saveCreds } = await useMultiFileAuthState(`./sessions/${phone}`);
-    
+    const sessionPath = path.join(sessionsDir, phone);
+    const { state, saveCreds } = await useMultiFileAuthState(sessionPath);
+
     const sock = makeWASocket({
         auth: state,
         logger: pino({ level: 'silent' }),
         printQRInTerminal: false,
-        browser: ["Ubuntu", "Chrome", "20.0.04"] // Browser identity দেওয়া জরুরি
+        // Baileys-এর জন্য সঠিক ব্রাউজার নাম যা 'Logging in...' হ্যাং হওয়া বন্ধ করে
+        browser: Browsers.ubuntu('Chrome'),
+        connectTimeoutMs: 60000,
+        defaultQueryTimeoutMs: 0,
+        keepAliveIntervalMs: 10000,
+        emitOwnEvents: true,
+        retryRequestDelayMs: 250
     });
 
     sock.ev.on('creds.update', saveCreds);
@@ -27,12 +42,19 @@ async function startWASocket(phone) {
         const { connection, lastDisconnect } = update;
 
         if (connection === 'close') {
-            const shouldReconnect = (lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut);
+            const statusCode = lastDisconnect?.error?.output?.statusCode;
+            const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
             console.log(`Connection closed for ${phone}. Reconnecting: ${shouldReconnect}`);
+            
             if (shouldReconnect) {
+                delete activeSockets[phone];
                 await startWASocket(phone);
             } else {
                 delete activeSockets[phone];
+                // লগআউট হয়ে গেলে সেশন ফাইল মুছে ফেলা
+                if (fs.existsSync(sessionPath)) {
+                    fs.rmSync(sessionPath, { recursive: true, force: true });
+                }
             }
         } else if (connection === 'open') {
             console.log(`WhatsApp connected successfully for: ${phone}`);
@@ -43,10 +65,27 @@ async function startWASocket(phone) {
     return sock;
 }
 
-// ১. পেয়ারিং কোড নেওয়ার রুট
+// সার্ভার চালু হওয়ার সময় বিদ্যমান সেশন অটো রিকানেক্ট করার লজিক
+async function initExistingSessions() {
+    if (fs.existsSync(sessionsDir)) {
+        const folders = fs.readdirSync(sessionsDir);
+        for (const folder of folders) {
+            if (fs.lstatSync(path.join(sessionsDir, folder)).isDirectory()) {
+                console.log(`Restoring existing session for: ${folder}`);
+                try {
+                    await startWASocket(folder);
+                } catch (e) {
+                    console.error(`Failed to restore session for ${folder}:`, e.message);
+                }
+            }
+        }
+    }
+}
+
+// ১. পেয়ারিং কোড নেওয়ার রুট
 app.get('/pair', async (req, res) => {
     let phone = req.query.phone;
-    if (!phone) return res.status(400).json({ error: "Phone number required" });
+    if (!phone) return res.status(400).json({ status: false, error: "Phone number required" });
 
     phone = phone.replace(/[^0-9]/g, '');
 
@@ -54,11 +93,11 @@ app.get('/pair', async (req, res) => {
         const sock = await startWASocket(phone);
 
         if (!sock.authState.creds.registered) {
-            await delay(3000); // পেয়ারিং কোড জেনারেটের আগে ব্যাকএন্ডকে স্থির হওয়ার পর্যাপ্ত সময় দেওয়া
+            await delay(3000); // পেয়ারিং কোড তৈরির আগে সকেটকে স্থিতিশীল সময় দেওয়া
             const code = await sock.requestPairingCode(phone);
             return res.json({ status: true, code: code });
         } else {
-            return res.json({ status: false, error: "Already registered" });
+            return res.json({ status: false, error: "Already registered and connected" });
         }
     } catch (err) {
         console.error(err);
@@ -85,7 +124,7 @@ app.get('/check', async (req, res) => {
 
     try {
         const results = await sock.onWhatsApp(target);
-        
+
         if (results && results.length > 0 && results[0].exists) {
             return res.json({
                 status: true,
@@ -107,4 +146,7 @@ app.get('/check', async (req, res) => {
     }
 });
 
-app.listen(3000, () => console.log('WA Pairing & Checker API running on port 3000'));
+app.listen(PORT, () => {
+    console.log(`WA Pairing & Checker API running on port ${PORT}`);
+    initExistingSessions();
+});
