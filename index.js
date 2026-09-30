@@ -10,13 +10,11 @@ app.use(express.json());
 const activeSockets = {};
 const PORT = process.env.PORT || 3000;
 
-// সেশন ডিরেক্টরি নিশ্চিত করা
 const sessionsDir = path.join(__dirname, 'sessions');
 if (!fs.existsSync(sessionsDir)) {
     fs.mkdirSync(sessionsDir, { recursive: true });
 }
 
-// সকেট তৈরি ও হ্যান্ডলিংয়ের জন্য ফাংশন
 async function startWASocket(phone) {
     if (activeSockets[phone]) return activeSockets[phone];
 
@@ -27,7 +25,6 @@ async function startWASocket(phone) {
         auth: state,
         logger: pino({ level: 'silent' }),
         printQRInTerminal: false,
-        // Baileys-এর জন্য সঠিক ব্রাউজার নাম যা 'Logging in...' হ্যাং হওয়া আটকাবে
         browser: Browsers.ubuntu('Chrome'),
         connectTimeoutMs: 60000,
         defaultQueryTimeoutMs: 0,
@@ -47,13 +44,11 @@ async function startWASocket(phone) {
             console.log(`Connection closed for ${phone}. Reconnecting: ${shouldReconnect}`);
             
             if (shouldReconnect) {
-                // ১.৫ সেকেন্ড বিরতি দিয়ে রিকানেক্ট
                 await delay(1500);
                 delete activeSockets[phone];
                 await startWASocket(phone);
             } else {
                 delete activeSockets[phone];
-                // সেশন লগআউট হয়ে গেলে পুরোনো সেশন ফোল্ডার ডিলেট করা
                 try {
                     if (fs.existsSync(sessionPath)) {
                         fs.rmSync(sessionPath, { recursive: true, force: true });
@@ -70,7 +65,6 @@ async function startWASocket(phone) {
     return sock;
 }
 
-// সার্ভার চালু হওয়ার সময় বিদ্যমান সেশন অটো রিকানেক্ট করার লজিক
 async function initExistingSessions() {
     if (fs.existsSync(sessionsDir)) {
         const folders = fs.readdirSync(sessionsDir);
@@ -98,7 +92,7 @@ app.get('/pair', async (req, res) => {
         const sock = await startWASocket(phone);
 
         if (!sock.authState.creds.registered) {
-            await delay(3000); // পেয়ারিং কোড জেনারেটের আগে ব্যাকএন্ডকে স্থির হওয়ার পর্যাপ্ত সময় দেওয়া
+            await delay(3000);
             const code = await sock.requestPairingCode(phone);
             return res.json({ status: true, code: code });
         } else {
@@ -110,7 +104,44 @@ app.get('/pair', async (req, res) => {
     }
 });
 
-// ২. নম্বর চেক করার রুট
+// ২. সেশন স্ট্যাটাস চেক রুট
+app.get('/status', async (req, res) => {
+    let phone = req.query.phone;
+    if (!phone) return res.status(400).json({ status: false, error: "Phone number required" });
+    phone = phone.replace(/[^0-9]/g, '');
+
+    const sock = activeSockets[phone];
+    if (sock && sock.user) {
+        return res.json({ status: true, connected: true, user: sock.user });
+    } else {
+        return res.json({ status: true, connected: false });
+    }
+});
+
+// ৩. সেশন ডিলেট/লগআউট রুট
+app.get('/logout', async (req, res) => {
+    let phone = req.query.phone;
+    if (!phone) return res.status(400).json({ status: false, error: "Phone number required" });
+    phone = phone.replace(/[^0-9]/g, '');
+
+    const sock = activeSockets[phone];
+    const sessionPath = path.join(sessionsDir, phone);
+
+    try {
+        if (sock) {
+            await sock.logout();
+            delete activeSockets[phone];
+        }
+        if (fs.existsSync(sessionPath)) {
+            fs.rmSync(sessionPath, { recursive: true, force: true });
+        }
+        return res.json({ status: true, message: "Session logged out and deleted successfully" });
+    } catch (err) {
+        return res.status(500).json({ status: false, error: err.message });
+    }
+});
+
+// ৪. নম্বর চেক করার রুট
 app.get('/check', async (req, res) => {
     let { sender, target } = req.query;
 
