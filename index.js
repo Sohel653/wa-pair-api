@@ -81,7 +81,7 @@ async function initExistingSessions() {
     }
 }
 
-// ১. পেয়ারিং কোড নেওয়ার রুট
+// 1. Pairing Code Endpoint
 app.get('/pair', async (req, res) => {
     let phone = req.query.phone;
     if (!phone) return res.status(400).json({ status: false, error: "Phone number required" });
@@ -104,7 +104,7 @@ app.get('/pair', async (req, res) => {
     }
 });
 
-// ২. সেশন স্ট্যাটাস চেক রুট
+// 2. Session Status Endpoint
 app.get('/status', async (req, res) => {
     let phone = req.query.phone;
     if (!phone) return res.status(400).json({ status: false, error: "Phone number required" });
@@ -118,7 +118,7 @@ app.get('/status', async (req, res) => {
     }
 });
 
-// ৩. সেশন ডিলেট/লগআউট রুট
+// 3. Delete / Logout Endpoint
 app.get('/logout', async (req, res) => {
     let phone = req.query.phone;
     if (!phone) return res.status(400).json({ status: false, error: "Phone number required" });
@@ -135,18 +135,18 @@ app.get('/logout', async (req, res) => {
         if (fs.existsSync(sessionPath)) {
             fs.rmSync(sessionPath, { recursive: true, force: true });
         }
-        return res.json({ status: true, message: "Session logged out and deleted successfully" });
+        return res.json({ status: true, message: "Session deleted successfully" });
     } catch (err) {
         return res.status(500).json({ status: false, error: err.message });
     }
 });
 
-// ৪. নম্বর চেক করার রুট
+// 4. Number Check Endpoint
 app.get('/check', async (req, res) => {
     let { sender, target } = req.query;
 
     if (!sender || !target) {
-        return res.status(400).json({ status: false, error: "sender এবং target দুটিই প্রয়োজন।" });
+        return res.status(400).json({ status: false, error: "sender and target required" });
     }
 
     sender = sender.replace(/[^0-9]/g, '');
@@ -155,7 +155,7 @@ app.get('/check', async (req, res) => {
     const sock = activeSockets[sender];
 
     if (!sock) {
-        return res.status(400).json({ status: false, error: "Sender number is not connected or logged in." });
+        return res.status(400).json({ status: false, error: "Sender number is not connected" });
     }
 
     try {
