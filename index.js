@@ -27,13 +27,13 @@ async function startWASocket(phone) {
         auth: state,
         logger: pino({ level: 'silent' }),
         printQRInTerminal: false,
-        // Baileys-এর জন্য সঠিক ব্রাউজার নাম যা 'Logging in...' হ্যাং হওয়া বন্ধ করে
+        // Baileys-এর জন্য সঠিক ব্রাউজার নাম যা 'Logging in...' হ্যাং হওয়া আটকাবে
         browser: Browsers.ubuntu('Chrome'),
         connectTimeoutMs: 60000,
         defaultQueryTimeoutMs: 0,
         keepAliveIntervalMs: 10000,
         emitOwnEvents: true,
-        retryRequestDelayMs: 250
+        retryRequestDelayMs: 500
     });
 
     sock.ev.on('creds.update', saveCreds);
@@ -47,17 +47,22 @@ async function startWASocket(phone) {
             console.log(`Connection closed for ${phone}. Reconnecting: ${shouldReconnect}`);
             
             if (shouldReconnect) {
+                // ১.৫ সেকেন্ড বিরতি দিয়ে রিকানেক্ট
+                await delay(1500);
                 delete activeSockets[phone];
                 await startWASocket(phone);
             } else {
                 delete activeSockets[phone];
-                // লগআউট হয়ে গেলে সেশন ফাইল মুছে ফেলা
-                if (fs.existsSync(sessionPath)) {
-                    fs.rmSync(sessionPath, { recursive: true, force: true });
-                }
+                // সেশন লগআউট হয়ে গেলে পুরোনো সেশন ফোল্ডার ডিলেট করা
+                try {
+                    if (fs.existsSync(sessionPath)) {
+                        fs.rmSync(sessionPath, { recursive: true, force: true });
+                    }
+                } catch (e) {}
             }
         } else if (connection === 'open') {
             console.log(`WhatsApp connected successfully for: ${phone}`);
+            activeSockets[phone] = sock;
         }
     });
 
@@ -93,7 +98,7 @@ app.get('/pair', async (req, res) => {
         const sock = await startWASocket(phone);
 
         if (!sock.authState.creds.registered) {
-            await delay(3000); // পেয়ারিং কোড তৈরির আগে সকেটকে স্থিতিশীল সময় দেওয়া
+            await delay(3000); // পেয়ারিং কোড জেনারেটের আগে ব্যাকএন্ডকে স্থির হওয়ার পর্যাপ্ত সময় দেওয়া
             const code = await sock.requestPairingCode(phone);
             return res.json({ status: true, code: code });
         } else {
